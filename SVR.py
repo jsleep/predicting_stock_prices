@@ -4,7 +4,7 @@ from sklearn.svm import SVR
 import matplotlib.pyplot as plt
 
 
-plt.switch_backend('newbackend')  
+#plt.switch_backend('newbackend')  
 
 
 
