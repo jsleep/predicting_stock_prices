@@ -1,4 +1,4 @@
-import csv
+import csv, random
 import numpy as np
 from sklearn.svm import SVR
 import matplotlib.pyplot as plt
@@ -35,18 +35,43 @@ def get_all_data():
                 if row[1] != '-':
                     data[comp_name][parse(row[0])] = float(row[1])
 
+def get_features(comp, date):
+    return [data[comp][date]]
 
-def get_data(filename):
-    with open(filename, 'r') as csvfile:
-        csvFileReader = csv.reader(csvfile)
-        next(csvFileReader)	# skipping column names
-        for row in csvFileReader:
-            dates.append(int(row[0].split('-')[0]))
-            prices.append(float(row[1]))
-    return
+def run_cross_fold_validation(comp, k_fold=10, data_subset=None):
+    if data_subset:
+        pass
+    else:
+        total = []
+
+        for date in data[comp].keys():
+            features = get_features(comp, date)
+            if features:
+                total.append((features, data[comp][date]))
+        random.shuffle(total)
+
+        avg_acc = 0
+
+        for ndx in range(k_fold):
+            startndx = int(ndx / k_fold * len(total))
+            endndx = int((ndx + 1) / k_fold * len(total))
+            test = total[startndx:endndx]
+            train = total[:startndx]
+            train.extend(total[endndx:])
+
+            # Switch this to whatever you want, like below
+            svr_lin = SVR(kernel='linear', C = 1e3)
+            svr_lin.fit([x[0] for x in train], [x[1] for x in train])
+
+            avg_acc += svr_lin.score([x[0] for x in test], [x[1] for x in test])
+
+        avg_acc /= k_fold
+
+        print('Avg R^2 = ' + str(avg_acc))
+
 
 def predict_price(dates, prices, x):
-    dates = np.reshape(dates,(len(dates), 1)) # converting to matrix of n X 1
+
 
     svr_lin = SVR(kernel= 'linear', C= 1e3)
     svr_poly = SVR(kernel= 'poly', C= 1e3, degree= 2)
@@ -68,4 +93,4 @@ def predict_price(dates, prices, x):
     return svr_rbf.predict(x)[0], svr_lin.predict(x)[0], svr_poly.predict(x)[0]
 
 get_all_data()
-print(data)
+run_cross_fold_validation('Oracle')
