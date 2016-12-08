@@ -1,6 +1,7 @@
 import csv, random
 import numpy as np
 from sklearn.svm import SVR
+from sklearn.neural_network import MLPRegressor
 import matplotlib.pyplot as plt
 from dateutil.parser import parse
 
@@ -17,11 +18,19 @@ data = {
     'IBM': {},
     'MSFT': {},
     'Oracle': {},
-    'Samsung': {},
     'Twitter': {}
 }
 
+svr_params = {
+    'kernel': 'linear',
+    'C': 1e3
+}
 
+nnr_params = {
+    'hidden_layer_sizes': (22, 11),
+    'solver': 'lbfgs',
+    'max_iter': 1000
+}
 
 dates = []
 prices = []
@@ -50,7 +59,8 @@ def run_cross_fold_validation(comp, k_fold=10, data_subset=None):
                 total.append((features, data[comp][date]))
         random.shuffle(total)
 
-        avg_acc = 0
+        svr_avg_acc = 0
+        nnr_avg_r2 = 0
 
         for ndx in range(k_fold):
             startndx = int(ndx / k_fold * len(total))
@@ -59,15 +69,22 @@ def run_cross_fold_validation(comp, k_fold=10, data_subset=None):
             train = total[:startndx]
             train.extend(total[endndx:])
 
+            # Neural Net, because why not
+            nnr = MLPRegressor(**nnr_params)
+            nnr.fit([x[0] for x in train], [x[1] for x in train])
+
             # Switch this to whatever you want, like below
             svr_lin = SVR(kernel='linear', C = 1e3)
             svr_lin.fit([x[0] for x in train], [x[1] for x in train])
 
-            avg_acc += svr_lin.score([x[0] for x in test], [x[1] for x in test])
+            svr_avg_acc += svr_lin.score([x[0] for x in test], [x[1] for x in test])
+            nnr_avg_r2 += nnr.score([x[0] for x in test], [x[1] for x in test])
 
-        avg_acc /= k_fold
+        svr_avg_acc /= k_fold
+        nnr_avg_r2 /= k_fold
 
-        print('Avg R^2 = ' + str(avg_acc))
+        print('Avg SVM R^2 = ' + str(svr_avg_acc))
+        print('Avg Neural Net R^2 = ' + str(nnr_avg_r2))
 
 
 def predict_price(dates, prices, x):
