@@ -7,7 +7,7 @@ from dateutil.parser import parse
 
 comp_names = [
     'Amazon', 'Facebook', 'IBM', 'Oracle', 'Twitter',
-    'Apple', 'Google', 'MSFT', 'Samsung'
+    'Apple', 'Google', 'MSFT'
 ]
 
 data = {
@@ -74,7 +74,7 @@ def run_cross_fold_validation(comp, k_fold=10, data_subset=None):
             nnr.fit([x[0] for x in train], [x[1] for x in train])
 
             # Switch this to whatever you want, like below
-            svr_lin = SVR(kernel='linear', C = 1e3)
+            svr_lin = SVR(**svr_params)
             svr_lin.fit([x[0] for x in train], [x[1] for x in train])
 
             svr_avg_acc += svr_lin.score([x[0] for x in test], [x[1] for x in test])
@@ -109,5 +109,10 @@ def predict_price(dates, prices, x):
 
     return svr_rbf.predict(x)[0], svr_lin.predict(x)[0], svr_poly.predict(x)[0]
 
-get_all_data()
-run_cross_fold_validation('Oracle')
+def main():
+    get_all_data()
+    run_cross_fold_validation('Oracle')
+
+
+if __name__ == '__main__':
+    main()
