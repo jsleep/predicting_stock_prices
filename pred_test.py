@@ -31,17 +31,15 @@ nnr_params = {
     'hidden_layer_sizes': (8, 5),
     'solver': 'lbfgs',
     'activation': 'logistic',
-    'max_iter': 10000
+    'max_iter': 1000
 }
 
 nnc_params = {
-    'hidden_layer_sizes': (8, 5),
+    'hidden_layer_sizes': (15, 10),
     'solver': 'lbfgs',
     'activation': 'logistic',
     'max_iter': 1000
 }
-
-
 
 def get_num_for_date(date):
     return (date - parse('Dec 5 2011')).days
@@ -79,9 +77,8 @@ DAYS_BACK = 10
 
 def get_features(comp, date_num, diff):
     features = []
-    features.append(date_num)
     for ndx in range(1, DAYS_BACK + 1):
-        if minus_bus_days(date_num, ndx, comp) in data.keys():
+        if minus_bus_days(date_num, ndx, comp) in data[comp].keys():
             if diff:
                 features.append(data[comp][minus_bus_days(date_num, ndx, comp)] -
                                 data[comp][minus_bus_days(date_num, ndx + 1, comp)])
@@ -89,13 +86,13 @@ def get_features(comp, date_num, diff):
                 features.append(data[comp][minus_bus_days(date_num, ndx, comp)])
         else:
             features.append(0)
-    features.append(get_date_for_num(date_num).month)
-    features.append(get_date_for_num(date_num).day + 30 * get_date_for_num(date_num).month)
+    #features.append(get_date_for_num(date_num).month)
+    features.append(get_date_for_num(date_num).timetuple().tm_yday)
     features.append(date_num)
 
     return features
 
-def run_cross_fold_validation(comp, k_fold=10, data_subset=None, diff=False, plot=False, classifier_days_in_future=1):
+def run_cross_fold_validation(comp, k_fold=10, data_subset=None, diff=False, plot=False, classifier_days_in_future=1, aggregate_total_data=None, use_model=None):
     total = []
     total_class = []
 
@@ -112,6 +109,9 @@ def run_cross_fold_validation(comp, k_fold=10, data_subset=None, diff=False, plo
                 total.append((features, (data[comp][add_bus_days(date_num, classifier_days_in_future - 1, comp)]) - (data[comp][minus_bus_days(date_num, 1, comp)])))
             else:
                 total.append((features, data[comp][date_num]))
+    if aggregate_total_data is not None:
+        aggregate_total_data.extend(total_class)
+
     random.shuffle(total)
     random.shuffle(total_class)
 
@@ -138,8 +138,11 @@ def run_cross_fold_validation(comp, k_fold=10, data_subset=None, diff=False, plo
         nnr = MLPRegressor(**nnr_params)
         nnr.fit([x[0] for x in train], [x[1] for x in train])
 
-        nnc = MLPClassifier(**nnc_params)
-        nnc.fit([x[0] for x in train_class], [x[1] for x in train_class])
+        if use_model is not None:
+            nnc = use_model
+        else:
+            nnc = MLPClassifier(**nnc_params)
+            nnc.fit([x[0] for x in train_class], [x[1] for x in train_class])
 
         # Switch this to whatever you want, like below
         #svr_lin = SVR(**svr_params)
@@ -148,6 +151,9 @@ def run_cross_fold_validation(comp, k_fold=10, data_subset=None, diff=False, plo
         #svr_acc = svr_lin.score([x[0] for x in test], [x[1] for x in test])
         nnr_acc = nnr.score([x[0] for x in test], [x[1] for x in test])
         nnc_acc = nnc.score([x[0] for x in test_class], [x[1] for x in test_class])
+
+        pred_class = nnc.predict([y[0] for y in test_class])
+        actual_class = [y[1] for y in test_class]
 
         if nnr_acc > best_nnr_acc:
             best_nnr_acc = nnr_acc
@@ -162,7 +168,7 @@ def run_cross_fold_validation(comp, k_fold=10, data_subset=None, diff=False, plo
         nnc_avg_acc += nnc_acc
 
         #print(nnr_acc, sep=", ")
-        print(nnc_acc, sep=", ")
+        #print(nnc_acc, sep=", ")
 
     #svr_avg_acc /= k_fold
     nnr_avg_r2 /= k_fold
@@ -188,9 +194,10 @@ def run_cross_fold_validation(comp, k_fold=10, data_subset=None, diff=False, plo
                      color='red', label='NNR model')  # plotting the line made by the RBF kernel
         plt.xlabel('Date')
         plt.ylabel('Price')
-        plt.title('Support Vector Regression')
-        plt.legend()
+        plt.title('MLPRegressor Predictions for ' + comp + "\nR^2 = " + str(best_nnr_acc))
         plt.show()
+
+    return aggregate_total_data
 
 
 def predict_price(dates, prices, x):
@@ -217,10 +224,31 @@ def predict_price(dates, prices, x):
 
 def main():
     get_all_data()
+    aggregate_data = []
     for name in data.keys():
+        print(name)
         startdate = min([datenum for datenum in data[name].keys()])
-        run_cross_fold_validation(name, data_subset=[datenum for datenum in data[name].keys() if datenum > DAYS_BACK + 1 + startdate],
-                                  diff=True, plot=False, classifier_days_in_future=5)
+        aggregate_data = run_cross_fold_validation(name, data_subset=[datenum for datenum in data[name].keys() if datenum > DAYS_BACK + 1 + startdate],
+                                  diff=False, plot=False, classifier_days_in_future=5, aggregate_total_data=aggregate_data)
+        print()
+
+    random.shuffle(aggregate_data)
+
+    test = aggregate_data[:int(.1*len(aggregate_data))]
+    train = aggregate_data[int(.1*len(aggregate_data)):]
+
+    nnc = MLPClassifier(**nnc_params)
+    nnc.fit([x[0] for x in train], [x[1] for x in train])
+
+    overall_acc = nnc.score([y[0] for y in test], [y[1] for y in test])
+    print("Overall accuracy = " + str(overall_acc))
+
+    for name in data.keys():
+        print(name)
+        startdate = min([datenum for datenum in data[name].keys()])
+        aggregate_data = run_cross_fold_validation(name, data_subset=[datenum for datenum in data[name].keys() if datenum > DAYS_BACK + 1 + startdate],
+                                  diff=False, plot=False, classifier_days_in_future=5, use_model=nnc)
+        print()
 
 
 if __name__ == '__main__':
