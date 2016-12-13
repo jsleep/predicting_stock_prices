@@ -233,15 +233,26 @@ def main():
         print()
 
     random.shuffle(aggregate_data)
+    k_fold = 10
 
-    test = aggregate_data[:int(.1*len(aggregate_data))]
-    train = aggregate_data[int(.1*len(aggregate_data)):]
+    avg_acc = 0
 
-    nnc = MLPClassifier(**nnc_params)
-    nnc.fit([x[0] for x in train], [x[1] for x in train])
+    for ndx in range(k_fold):
+        startndx = int(ndx / k_fold * len(aggregate_data))
+        endndx = int((ndx + 1) / k_fold * len(aggregate_data))
+        test = aggregate_data[startndx:endndx]
+        train = aggregate_data[:startndx]
+        train.extend(aggregate_data[endndx:])
 
-    overall_acc = nnc.score([y[0] for y in test], [y[1] for y in test])
-    print("Overall accuracy = " + str(overall_acc))
+        nnc = MLPClassifier(**nnc_params)
+        nnc.fit([x[0] for x in train], [x[1] for x in train])
+
+        overall_acc = nnc.score([y[0] for y in test], [y[1] for y in test])
+        avg_acc += overall_acc
+        print("Overall accuracy = " + str(overall_acc))
+    avg_acc /= k_fold
+    print("Average Overall accuracy = " + str(avg_acc))
+    print()
 
     for name in data.keys():
         print(name)
