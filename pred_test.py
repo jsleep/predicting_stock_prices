@@ -1,7 +1,7 @@
 import csv, random
 import numpy as np
 from sklearn.svm import SVR
-from sklearn.neural_network import MLPRegressor
+from sklearn.neural_network import MLPRegressor, MLPClassifier
 import matplotlib.pyplot as plt
 from dateutil.parser import parse
 from datetime import datetime, timedelta
@@ -28,6 +28,13 @@ svr_params = {
 }
 
 nnr_params = {
+    'hidden_layer_sizes': (8, 5),
+    'solver': 'lbfgs',
+    'activation': 'logistic',
+    'max_iter': 10000
+}
+
+nnc_params = {
     'hidden_layer_sizes': (8, 5),
     'solver': 'lbfgs',
     'activation': 'logistic',
@@ -70,36 +77,51 @@ def get_all_data():
 
 DAYS_BACK = 10
 
-def get_features(comp, date_num):
+def get_features(comp, date_num, diff):
     features = []
     features.append(date_num)
-    for ndx in range(1, 11):
+    for ndx in range(1, DAYS_BACK + 1):
         if minus_bus_days(date_num, ndx, comp) in data.keys():
-            features.append(data[comp][minus_bus_days(date_num, ndx, comp)])
+            if diff:
+                features.append(data[comp][minus_bus_days(date_num, ndx, comp)] -
+                                data[comp][minus_bus_days(date_num, ndx + 1, comp)])
+            else:
+                features.append(data[comp][minus_bus_days(date_num, ndx, comp)])
         else:
             features.append(0)
     features.append(get_date_for_num(date_num).month)
     features.append(get_date_for_num(date_num).day + 30 * get_date_for_num(date_num).month)
+    features.append(date_num)
 
     return features
 
-def run_cross_fold_validation(comp, k_fold=10, data_subset=None, diff=False):
+def run_cross_fold_validation(comp, k_fold=10, data_subset=None, diff=False, plot=False, classifier_days_in_future=1):
     total = []
+    total_class = []
 
     if data_subset is None:
-        data_subset = data[comp].keys()
+        data_subset = sorted(data[comp].keys())
+    if classifier_days_in_future > 1:
+        data_subset = data_subset[:(-classifier_days_in_future + 1)]
 
     for date_num in data_subset:
-        features = get_features(comp, date_num)
+        features = get_features(comp, date_num, diff)
         if features:
+            total_class.append((features, (data[comp][date_num]) - (data[comp][minus_bus_days(date_num, 1, comp)]) > 0))
             if diff:
-                total.append((features, (data[comp][date_num]) - (data[comp][minus_bus_days(date_num, 1, comp)])))
+                total.append((features, (data[comp][add_bus_days(date_num, classifier_days_in_future - 1, comp)]) - (data[comp][minus_bus_days(date_num, 1, comp)])))
             else:
                 total.append((features, data[comp][date_num]))
     random.shuffle(total)
+    random.shuffle(total_class)
 
     svr_avg_acc = 0
     nnr_avg_r2 = 0
+
+    nnc_avg_acc = 0
+
+    best_nnr_acc = -1000
+    best_nnc_acc = -1
 
     for ndx in range(k_fold):
         startndx = int(ndx / k_fold * len(total))
@@ -108,9 +130,16 @@ def run_cross_fold_validation(comp, k_fold=10, data_subset=None, diff=False):
         train = total[:startndx]
         train.extend(total[endndx:])
 
+        test_class = total_class[startndx:endndx]
+        train_class = total_class[:startndx]
+        train_class.extend(total_class[endndx:])
+
         # Neural Net, because why not
         nnr = MLPRegressor(**nnr_params)
         nnr.fit([x[0] for x in train], [x[1] for x in train])
+
+        nnc = MLPClassifier(**nnc_params)
+        nnc.fit([x[0] for x in train_class], [x[1] for x in train_class])
 
         # Switch this to whatever you want, like below
         #svr_lin = SVR(**svr_params)
@@ -118,37 +147,50 @@ def run_cross_fold_validation(comp, k_fold=10, data_subset=None, diff=False):
 
         #svr_acc = svr_lin.score([x[0] for x in test], [x[1] for x in test])
         nnr_acc = nnr.score([x[0] for x in test], [x[1] for x in test])
+        nnc_acc = nnc.score([x[0] for x in test_class], [x[1] for x in test_class])
+
+        if nnr_acc > best_nnr_acc:
+            best_nnr_acc = nnr_acc
+            best_model = nnr
+
+        if nnc_acc > best_nnc_acc:
+            best_nnc_acc = nnc_acc
+            best_class_model = nnc
 
         #svr_avg_acc += svr_acc
         nnr_avg_r2 += nnr_acc
+        nnc_avg_acc += nnc_acc
 
-        print(nnr_acc, sep=", ")
+        #print(nnr_acc, sep=", ")
+        print(nnc_acc, sep=", ")
 
     #svr_avg_acc /= k_fold
     nnr_avg_r2 /= k_fold
+    nnc_avg_acc /= k_fold
 
     #print('Avg SVM R^2 = ' + str(svr_avg_acc))
     print('Avg Neural Net R^2 = ' + str(nnr_avg_r2))
+    print('Avg Neural Net Classifier Accuracy = ' + str(nnc_avg_acc))
 
-    datenums = data_subset
-    if diff:
-        prices = [(data[comp][datenum] - data[comp][minus_bus_days(datenum, 1, comp)]) for datenum in datenums]
-    else:
-        prices = [data[comp][datenum] for datenum in datenums]
+    if plot:
+        datenums = data_subset
+        if diff:
+            prices = [(data[comp][datenum] - data[comp][minus_bus_days(datenum, 1, comp)]) for datenum in datenums]
+        else:
+            prices = [data[comp][datenum] for datenum in datenums]
 
-    plt.scatter(datenums, prices, color='black', label='Data', marker='o')  # plotting the initial datapoints
-    if diff:
-        plt.plot(datenums, nnr.predict([get_features(comp, datenum) for datenum in datenums]),
-                 color='red',label='NNR model')  # plotting the line made by the RBF kernel
-    else:
-        plt.plot(datenums, nnr.predict([get_features(comp, datenum) for datenum in datenums]),
-                 color='red', label='NNR model')  # plotting the line made by the RBF kernel
-    plt.xlabel('Date')
-    plt.ylabel('Price')
-    plt.title('Support Vector Regression')
-    plt.legend()
-    plt.show()
-
+        plt.scatter(datenums, prices, color='black', label='Data', marker='o')  # plotting the initial datapoints
+        if diff:
+            plt.plot(datenums, best_model.predict([get_features(comp, datenum, diff) for datenum in datenums]),
+                     color='red',label='NNR model')  # plotting the line made by the RBF kernel
+        else:
+            plt.plot(datenums, best_model.predict([get_features(comp, datenum, diff) for datenum in datenums]),
+                     color='red', label='NNR model')  # plotting the line made by the RBF kernel
+        plt.xlabel('Date')
+        plt.ylabel('Price')
+        plt.title('Support Vector Regression')
+        plt.legend()
+        plt.show()
 
 
 def predict_price(dates, prices, x):
@@ -175,7 +217,10 @@ def predict_price(dates, prices, x):
 
 def main():
     get_all_data()
-    run_cross_fold_validation('Oracle', data_subset=[datenum for datenum in data['Oracle'].keys() if datenum > DAYS_BACK], diff=False)
+    for name in data.keys():
+        startdate = min([datenum for datenum in data[name].keys()])
+        run_cross_fold_validation(name, data_subset=[datenum for datenum in data[name].keys() if datenum > DAYS_BACK + 1 + startdate],
+                                  diff=True, plot=False, classifier_days_in_future=5)
 
 
 if __name__ == '__main__':
